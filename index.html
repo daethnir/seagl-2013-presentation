@@ -1,0 +1,877 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" 
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<!--
+SSH replaced insecure protocols like telnet and ftp ages
+ago, but it has far more power than simple remote login
+capabilities. In this talk we'll cover passwordless SSH w/
+pubkeys and ssh-agent, locking down access with
+authorized_keys options, port forwards and SOCKS proxies,
+ssh 'bouncing', and more.
+
+Lastly, we'll introduce Authprogs, a soon-to-be-
+released SSH remote command authenticator, which allows you
+to restrict which commands can be run, thus limiting what
+access a trusted key is granted.
+-->
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<title>SSH: Pubkeys, Tunneling, Authprogs, and More </title>
+<!-- metadata -->
+<meta name="generator" content="S5" />
+<meta name="version" content="S5 1.1" />
+<meta name="presdate" content="20131011" />
+<meta name="author" content="Bri Hatch" />
+<meta name="company" content="ExtraHop Networks" />
+<!-- configuration parameters -->
+<meta name="defaultView" content="slideshow" />
+<meta name="controlVis" content="hidden" />
+<!-- style sheet links -->
+<link rel="stylesheet" href="ui/default/slides.css" type="text/css" media="projection" id="slideProj" />
+<link rel="stylesheet" href="ui/default/outline.css" type="text/css" media="screen" id="outlineStyle" />
+<link rel="stylesheet" href="ui/default/print.css" type="text/css" media="print" id="slidePrint" />
+<link rel="stylesheet" href="ui/default/opera.css" type="text/css" media="projection" id="operaFix" />
+<!-- S5 JS -->
+<script src="ui/default/slides.js" type="text/javascript"></script>
+</head>
+<body>
+
+<div class="layout">
+<div id="controls"><!-- DO NOT EDIT --></div>
+<div id="currentSlide"><!-- DO NOT EDIT --></div>
+<div id="header"></div>
+<div id="footer">
+<h1>SeaGL, 2013-10-11</h1>
+<h2>SSH: Pubkeys, Tunneling, Authprogs...</h2>
+</div>
+
+</div>
+
+
+<div class="presentation">
+
+<div class="slide">
+<h1>SSH: Login Automation, Tunneling, Authprogs, and More</h1>
+<p>
+<table border=0 width=100% cellpadding="0">
+  <tr><th align=left><span style="font-size:150%">Personal</th>
+      <th align=left><span style="font-size:150%">Work</th></tr>
+    <tr><td valign=top><span style="font-size:150%">Bri Hatch<br>
+            Onsight, Inc<br>
+            bri@ifokr.org</span></td>
+        <td valign=top><span style="font-size:150%">Bri Hatch<br>
+            ExtraHop Networks<br>
+            bri@extrahop.com</span></td>
+    </tr>
+</table>
+<p>
+Copyright 2013, Bri Hatch,
+<a href="https://creativecommons.org/licenses/by-nc-sa/3.0/">Creative Commons BY-NC-SA License</a>
+</div>
+
+<div class="slide">
+<h1>SSH Pubkeys</h1>
+What are they?<p>
+<ul>
+    <li>Cryptographic key files on disk</li>
+    <li>Used in place of passwords for authentication</li>
+    <li>Can (should!) be password protected</li>
+    <li>Can be added to an <code>ssh-agent</code> for automation</li>
+</ul>
+</div>
+
+<div class="slide">
+    <h1>Generating a pubkey</h1>
+<pre>$ <b>ssh-keygen -b 2048 -C foo@example.com -f /tmp/key</b>
+Generating public/private rsa key pair.
+Enter passphrase (empty for no passphrase): <i><b>(enters passphrase)</b></i>
+Enter same passphrase again: <i><b>(enters passphrase again)</b></i>
+Your identification has been saved in /tmp/key.
+Your public key has been saved in /tmp/key.pub.
+The key fingerprint is:
+8b:07:14:c3:6e:f7:17:4c:78:0f:fb:94:71:ce:01:4b foo@example.com
+The key's randomart image is:
++--[ RSA 2048]----+
+|     .o    o E.  |
+|     .o.  . * o..|
+|     o.    o = *.|
+|      ...   o + o|
+|      ..S.   +   |
+|                 |
++-----------------+
+</div>
+
+<div class="slide">
+<h1>Generating a Pubkey (continued)</h1>
+Default Public/Private key is in <code>~/.ssh/id_rsa</code>:
+<p>
+<pre>
+$ <b>cat ~/.ssh/id_rsa</b>
+-----BEGIN RSA PRIVATE KEY-----
+Proc-Type: 4,ENCRYPTED
+DEK-Info: AES-128-CBC,5543DF16C874A2B95AD8BCAFE383A8A9
+
+N9K0VKkAROsq1siAPNgeD4enZiISszeP7LXj7tzvMkJ3gweGW7okvIhR/5iTIVih
+CjGCXb727YiDX/dHm0B8mPYTUPVHQ+xu+0FpuhKNP70erhI3jsimDO9PR3xZc6lx
+h2UaTKd7C7WwI9kyOdLrGrPIgAuoVpSpmJNOGjLZK54gooA7LfWZtK/o4CMDD1vf
+hlQ064qhIabk/j7FZ8LpjLf5TbEATaPRmpLrZOKABKVz0VfXEsw7sa8jqutNwB5e
+...
+
+$ <b>ls -l ~/.ssh/id_rsa</b>
+-rw------- 1 xlr xlr 1766 Jan 21 11:50 id_rsa
+</pre>
+<div class="handout">
+This file is nicely wrapped at 64 columns.
+</div>
+</div>
+
+<div class="slide">
+<h1>Generating a Pubkey (continued)</h1>
+Public key by itself is also in <code>~/.ssh/id_rsa.pub</code>:
+<p>
+<pre>
+$ <b>cat ~/.ssh/id_rsa</b>
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD3k5ng5Fn0089ed99z8Yr
+elv4FqYbN4VNespZx4tiY/jPleNVxPVId8WnxYOn/C4cmeAFltmEV8xDRr7
+bnnDfmRqGonrH2untJapB2p6cvv4u6VrG+UyfeZjJ2cPhCDdYzFqUCp+bPC
+07ZbXpfX5a4MCHj+wI5bmIBy2TllxFPE8HESCEpY7cO2yFCMn6kn1cJJSw5
+87BMgXr35TA+ZYj2Tur8NzQTSoSaT1lgqfCMoNLzsFf4V9wJAcvEI1WdvVP
+bdNOZBnVM7wIfUqmj7Iy8H03fm4MFkO5c2zBKVW9EHl43F19Ij0yZHZq0yg
+shSueK7PDQN07Gwak7NpYlzmBX foo@example.com
+
+$ <b>ls -l ~/.ssh/id_rsa.pub</b>
+-rw-r--r-- 1 xlr xlr 1766 Jan 21 11:51 id_rsa.pub
+</pre>
+<div class="handout">
+This file is one big long line, though it is wrapped here
+in the presentation.
+</div>
+
+<div class="slide">
+<h1>Logging in with Pubkeys</h1>
+Connecting with your pubkey:
+<p>
+<pre>
+$ <b>ssh somemachine -v -i /tmp/key</b>
+OpenSSH_5.9p1 Debian-5ubuntu1, OpenSSL 1.0.1 14 Mar 2012
+debug1: Reading configuration data /home/xlr/.ssh/config
+...
+debug1: SSH2_MSG_SERVICE_ACCEPT received
+debug1: Authentications that can continue: publickey,password
+debug1: <span style="color:#f80">Next authentication method: publickey</span>
+debug1: <span style="color:#f80">Offering RSA public key: /tmp/key</span>
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: password
+xlr@localhost's password: 
+</pre>
+<p>
+That wasn't an improvement...
+</div>
+
+<div class="slide">
+<h1>Trusting pubkeys</h1>
+You need to add your pubkey's public key to the
+<code>~/.ssh/authorized_keys</code> file on the SSH server.
+<p>
+<pre>
+$ <b>scp /tmp/key.pub somemachine:key.pub</b>
+$ <b>ssh somemachine</b>
+xlr@somemachine's password: <b>(types password)</b>
+
+somemachine$ <b>mkdir ~/.ssh; chmod 700 ~/.ssh</b>
+somemachine$ <b>touch ~/.ssh/authorized_keys</b>
+somemachine$ <b>chmod 600 ~/.ssh/authorized_keys</b>
+somemachine$ <b>cat key.pub >> ~/.ssh/authorized_keys</b>
+somemachine$ <b>exit</b>
+</pre>
+</div>
+
+<div class="slide">
+<h1>Trusting pubkeys (continued)</h1>
+Or, to be lazier, just use <code>ssh-copy-id</code>:
+<p>
+<pre>
+$ <b>ssh-copy-id -i /tmp/key.pub somemachine</b>
+xlr@somemachine's password: <b>(types password)</b>
+Now try logging into the machine, with "ssh 'xlr@somemachine'",
+  and check ~/.ssh/authorized_keys to make sure we haven't added
+   extra keys that you weren't expecting.
+</pre>
+</div>
+
+<div class="slide">
+<h1>Logging in with Pubkeys (take two)</h1>
+Connecting with your pubkey:
+<p>
+<pre>
+$ <b>ssh somemachine -v -i /tmp/key</b>
+OpenSSH_5.9p1 Debian-5ubuntu1, OpenSSL 1.0.1 14 Mar 2012
+debug1: Reading configuration data /home/xlr/.ssh/config
+...
+debug1: SSH2_MSG_SERVICE_ACCEPT received
+debug1: Authentications that can continue: publickey,password
+debug1: <span style="color:#f80">Next authentication method: publickey</span>
+debug1: <span style="color:#f80">Offering RSA public key: /tmp/key</span>
+Enter passphrase for key '/tmp/key': <b>(types pubkey password)</b>
+somemachine$ 
+</pre>
+</div>
+
+<div class="slide">
+<h1>Default pubkey files</h1>
+<ul>
+<li>If no pubkey is specified on command line or config file, <code>ssh</code>
+tries these:</li>
+<ul>
+    <li><code>~/.ssh/id_dsa</code></li>
+    <li><code>~/.ssh/id_ecdsa</code></li>
+    <li><code>~/.ssh/id_rsa</code></li>
+</ul>
+<li>SSH only tries three key before falling back to other authentication methods. Using <code>IdentiesOnly yes</code> can help.
+</ul>
+</div>
+
+
+
+<div class="slide">
+<h1>SSH Agent</h1>
+Trading a password for a pubkey password doesn't seem like much
+improvement.
+<p>
+Instead, stick them in an <code>ssh-agent</code>.
+<p>
+<pre>
+$ <b>eval $(ssh-agent)</b>
+Agent pid 24028
+$ <b>echo $SSH_AUTH_SOCK</b>
+/tmp/ssh-qcqvgHa24027/agent.24027
+$ <b>echo $SSH_AGENT_PID</b>
+24028
+
+$ <b>ssh-add -l</b>
+The agent has no identities.
+</pre>
+</div>
+
+<div class="slide">
+<h1>SSH Agent (continued)</h1>
+SSH Agent notes:
+<ul>
+<li>Many distros and X11 servers start your agent automatically.</li>
+<li>Some even have alternate daemons, such as <code>gnome-keyring-daemon</code> that may support other protocols too, e.g. gpg.</li>
+<li>Some daemons pretend keys are loaded before they are.</li>
+<li>Some may ask for passphrases on the GUI, even when you're connected remotely</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>SSH Agent (continued)</h1>
+Adding keys to the agent
+<p>
+<pre>
+$ <b>ssh-add -l</b>
+The agent has no identities.
+
+$ <b>ssh-add /tmp/key</b>
+Enter passphrase for /tmp/key: <b>(passphrase)</b>
+Identity added: /tmp/key (/tmp/key)
+
+$ <b>ssh-add -l</b>
+2048 8b:07:41:c3:e6:f7:17:c4:78:0f:fb:94:71:ce:01:4b /tmp/key (RSA)
+</pre>
+</div>
+
+<div class="slide">
+<h1>SSH Agent (continued)</h1>
+And now, log in!
+<p>
+<pre>
+$ <b>ssh -v somemachine -i /tmp/key</b>
+...
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: publickey
+debug1: Offering RSA public key: /tmp/key
+debug1: Server accepts key: pkalg ssh-rsa blen 279
+debug1: Authentication succeeded (publickey).
+somemachine$ 
+</pre>
+
+Look ma, no password!
+</div>
+
+<div class="slide">
+<h1>SSH Agent Security Ramifications</h1>
+<ul>
+<li>Root on your machine can use your agent as you.</li>
+<li>Agent does not 'expire' passwords by default.</li>
+<ul>
+    <li>Select <code>(ssh-add|ssh-agent) -t lifetime</code> to
+        automatically purge credentials.</li>
+
+    <li><code>ssh-add -x</code> locks your agent with a password,
+        <code>ssh-add -X</code> unlocks.</li>
+    <li>Delete all saved keys with <code>ssh-add -D</code></li>
+    <li>Delete specific keys with <code>ssh-add -d <i>pubkeyfile</i></code></li>
+</ul>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Agent Forwarding</h1>
+You can forward your agent to the machines to which you connect.
+<pre>
+$ ssh somemachine 'ssh-add -l'
+Could not open a connection to your authentication agent.
+
+$ ssh -A somemachine 'ssh-add -l'
+2048 8b:07:41:c3:e6:f7:17:c4:78:0f:fb:94:71:ce:01:4b /tmp/key (RSA)
+</pre>
+</div>
+
+<div class="slide">
+<h1>SSH Bouncing</h1>
+Say you need to ssh to Epsilon3 before you can ssh to Zathras.
+<p>
+<pre>
+$ <b>ssh -A -ttt epsilon3 ssh -ttt greatmachine</b>
+greatmachine$ 
+</pre>
+<p>
+Notes:
+<ul>
+<li>Assumes your pubkey is trusted on both machines</li>
+<li>Your agent is still forwarded on epsilon3</li>
+<li>A pain to type every time...</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>SSH Bouncing (continued)</h1>
+Simplify using <code>ProxyCommand</code> and <code>netcat</code>.
+<p>
+<pre>
+$ <b>cat ~/.ssh/config</b>
+Host greatmachine
+ProxyCommand ssh -q epsilon3 'nc %h %p'
+
+$ <b>ssh greatmachine</b>
+greatmachine$
+</pre>
+Notes:
+<ul>
+<li>Easier to type</li>
+<li>No agent available on intermediate machine</li>
+<li><code>%h</code> and <code>%p</code> in the <code>ProxyCommand</code>
+    are replaced with the actual host and port</li>
+</ul>
+</div>
+
+
+
+<div class="slide">
+<h1>Port Forwards</h1>
+<ul>
+<li>Bind a local port, tunnel through and out from destination</li>
+<li>Bind a remote port, tunnel through and out from client</li>
+<li>Usable locally only by default</li>
+<ul>
+<li>Use <code>GatewayPorts yes</code> to allow non-local use.</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Local Port Forwards</h1>
+
+Tunnel something from our client out through the server.
+<p>
+<pre>
+$ <b>ping -q -c 10 192.168.15.68</b>
+PING 192.168.15.68 (192.168.15.68) 56(84) bytes of data.
+10 packets transmitted, 0 received, +1 errors, <span style="color:#f80">100% packet loss</span>
+
+$ <b>ssh -L 8080:192.168.15.68:80 -Nf ssh-server</b>
+$ <b>curl http://localhost:8080/index.html</b>
+&lt;head&gt;&lt;title&gt;Welcome to 192.168.15.68!&lt;/title&gt;
+&lt;body&gt; ...
+</pre>
+<p>
+<ul>
+<li>You can point anything at port 8080, e.g. an actual web browser</li>
+<li><code>-Nf</code> prevents it from giving you a shell, and forks off in the background. For older ssh versions, you can use <code>-f ssh-server sleep +99d</code> to emulate.</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Remote Port Forwards</h1>
+Tunnel things from the server out through the client.
+<p>
+<pre>
+work$ <b>ssh -R 8080:127.0.0.1:22 -N myhouse </b>
+</pre>
+<p>
+Later...
+<p>
+<pre>
+myhouse$ <b>ssh -p 8080 policy_violator@localhost</b>
+policy_violator@localhost's password: <b>(enters password)</b>
+work$
+</pre>
+<p>
+Don't do this at home^H^H^H^H work!
+<div>
+
+<div class="slide">
+<h1>SSH SOCKS Proxy</h1>
+SSH can even bind a SOCKS proxy, which dynamically
+forwards connections without hard coding a bunch of local ports.
+<p>
+<pre>
+$ <b>ssh -Nf -D 9999 ssh-server</b>
+$ <b>curl --socks5 localhost:9999 http://192.168.15.68/</b>
+</pre>
+<p>
+Similarly, you could configure your browser to use a SOCKS proxy
+on <code>localhost:9999</code>
+</div>
+
+
+<div class="slide">
+<h1>Authorized_keys restrictions</h1>
+You can add restrictions to the entries in your
+<code>~/.ssh/authorized_keys</code> file.
+<p>
+<pre>
+$ <b>cat ~/.ssh/authorized_keys</b><small>
+ssh-rsa AAAANzaC1kc3MAAACBANJGoaoq+1gWhx781810vvf...EQQx7= key1@example.com
+no-port-forwarding ssh-rsa AAAAIpSVdm3aqGSMOgQ7P1...Pm1X8= key2@example.com
+no-agent-forwarding,no-X11-forwarding ssh-rsa AAA...xGGor= key3@example.com
+</small>
+</pre>
+</div>
+
+<div class="slide">
+<h1>Authorized_keys restrictions (continued)</h1>
+Complete options are in the <code>sshd</code> man page. Some of the most
+common options:
+<ul>
+<li>no-X11-forwarding</li>
+<li>no-agent-forwarding</li>
+<li>no-port-forwarding</li>
+<li>permitopen="host:port"</li>
+<li>from="..."</li>
+<ul>
+<li>Allows you to restrict which machines are allowed to use this pubkey</li>
+</ul>
+<li>command="..."</li>
+<ul>
+<li>Denies direct shell access and instead runs the command you specify</li>
+</ul>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Command Restrictions</h1>
+This <code>command=</code> restriction sounds great!
+ Prevent your keys from being used for any willy-nilly command.
+<p>
+Unfortunately:
+<ul>
+<li>You only can specify one command, not multiple options
+    like <code>from</code></li>
+<li>Putting security rules in <code>authorized_keys</code> is painful
+    to the eyes</li>
+</ul>
+<p>
+Enter <code>authprogs</code>.
+</div>
+
+<div class="slide">
+<h1>Authprogs</h1>
+Authprogs is an SSH command authenticator.
+<ul>
+<li>Decides if the specified command should run or be rejected</li>
+<li>Has some minimal protocol support, e.g. <code>scp</code> today</li>
+<li>Configuration is in <code>~/.ssh/authprogs.yaml</code> and
+    files in <code>~/.ssh/authprogs.d</code> directory.
+<li>Can install keys into <code>authorized_keys</code> automagically</li>
+<li>Running at ExtraHop since 2012</li>
+<li>Learns from mistakes of original perl version from 2003</li>
+<li>Releasing as Open Source (GPL Licensed) today!</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Installation</h1>
+<p>
+<pre>
+$ <b>sudo pip install authprogs</b>
+</pre>
+<p>
+Getting packaged into Debian RSN.
+</div>
+
+<div class="slide">
+<h1>Installing keys</h1>
+<p>
+<pre>
+$ <b>authprogs --install_key /path/to/id_rsa.pub</b>
+$ <b>tail -1 ~/.ssh/authorized_keys</b>
+<span style="font-size:75%">command="authprogs --run",no-port-forwarding ssh-rsa AAAAOg...Pm1X8= user@example.com</span>
+
+$ <b>authprogs --keyname push --install_key /path/to/push.pub</b>
+$ <b>tail -1 ~/.ssh/authorized_keys</b>
+<span style="font-size:75%">command="authprogs --keyname push --run",no-port-forwarding ssh-rsa AAAAGxNo22Hx...</span>
+</pre>
+<p>
+Installation automatically disables port forwarding. Tweak manually if desired.
+</div>
+
+<div class="slide">
+<h1>Configuration Examples</h1>
+Simplest version - a bunch of allowed commands.
+<P>
+<pre>
+$ <b>cat ~/.ssh/authprogs.yaml</b>
+allow:
+    - command: /bin/tar czvf /backups/www.tgz /var/www/
+    - command: /usr/bin/touch /var/www/.backups.complete
+</pre>
+</div>
+
+<div class="slide">
+<h1>Configuration Examples (continued)</h1>
+Keyname restrictions, <code>scp</code> support
+<pre><small>$ <b>cat ~/.ssh/authprogs.d/backups.yaml</b>
+keyname: backups
+allow:
+    - command: /bin/tar czvf /backups/www.tgz /var/www/
+    - command: /usr/bin/touch /var/www/.backups.complete
+--
+keyname: backup_snagger
+allow:
+    - rule_type: scp
+      allow_download: true
+      allow_recursion: true
+      files:
+        - /backups/www.tgz
+        - /etc/
+</small>
+</pre>
+</div>
+
+<div class="slide">
+<h1>Configuration Examples (continued)</h1>
+Trailing args, IP restrictions, PCRE command matching.
+<p>
+<pre>
+<small>$ <b>cat ~/.ssh/authprogs.d/admins.yaml</b>
+from:
+    - 192.168.1.1
+    - 192.168.1.2
+allow:
+    # Allow unrestricted ls
+    - command: /bin/ls
+      allow_trailing_args: true
+--
+from: [192.168.0.10, 192.168.0.15, 172.16.3.3]
+allow:
+    - command: ^sudo\s+/etc/init.d/apache2\s+(reload|restart)$
+      pcre_match: true
+</small>
+</pre>
+</div>
+
+
+
+<div class="slide">
+<h1>Limitations</h1>
+<ul>
+<li>Nothing that requires <code>bash</code>-like processing</li>
+<ul>
+<li>No multiple-command support</li>
+<li>No shell constructs like <code>for</code> or <code>while</code></li>
+<li>No glob expansion</li>
+</ul>
+<li>Not whitespace aware</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Future</h1>
+Things that may get implemented:
+<ul>
+<li>Rsync support</li>
+<li>Environment variables</li>
+<li>Specify <code>authorized_keys</code> restrictions at pubkey install
+     time</li>
+<li>CIDR support</li>
+<li>Shell regex command matching</li>
+</ul>
+<p>
+It's Open Source... what do you want to add? ;-)
+</div>
+
+
+
+<div class="slide">
+<h1>Verifying Host Keys</h1>
+Ever seen this?<p>
+<pre>$ <b>ssh somemachine</b>
+<small>The authenticity of host 'somemachine' can't be established.
+RSA key fingerprint is b8:5a:1e:47:87:48:58:14:6b:d2:52:3c:50:55:f6:f7
+Are you sure you want to continue connecting (yes/no)? 
+</small>
+</pre>
+</div>
+
+
+<div class="slide">
+<h1>Verifing the Host Key after login</h1>
+So you have no idea if that's really the server key, you're taking
+it on faith. It's too late to <b>survive</b> a MITM. 
+But it's not to late to see if you were subject to one!
+<p>
+<pre><small>$ <b>ssh somemachine</b>
+The authenticity of host 'somemachine' can't be established.
+RSA key fingerprint is b8:5a:1e:47:87:48:58:14:6b:d2:52:3c:50:55:f6:f7
+Are you sure you want to continue connecting (yes/no)? <b>yes</b>
+xlr@somemachine's password: <b><i>(enters password)</i></b></small>
+
+somemachine$ <b>ssh-keygen -l -f /etc/ssh/ssh_host_rsa_key.pub</b>
+2048 b8:5a:1e:47:77:a8:f5:14:bc:d2:25:99:50:55:f6:f7 somehost (RSA)
+</pre>
+<p>If it's different, call the admininistrator!
+<br><small>(And change your passwords....)</small>
+</div>
+
+<div class="slide">
+<h1>Verifying Host Keys Visually</h1>
+What follows is the exact same commands as before,
+but adding <code>VisualHostKey</code> for pretty pictures.
+<p>
+<pre>$ <b>ssh -o VisualHostKey=yes somemachine</b>
+<small>The authenticity of host 'somemachine' can't be established.
+RSA key fingerprint is b8:5a:1e:47:87:48:58:14:6b:d2:52:3c:50:55:f6:f7
++--[ RSA 2048]----+
+|    .=*o..o      |
+|     +o+ . .     |
+|    o =.o   . .  |
+|      + .        |
+|     o .         |
+|    .            |
++-----------------+
+Are you sure you want to continue connecting (yes/no)? <b>yes</b>
+xlr@somemachine's password: <b><i>(enters password)</i></b></small>
+</pre>
+</div>
+
+<div class="slide">
+<h1>Verifying Host Keys Visually (continued)</h1>
+Check server's fingerprint.
+<p>
+<pre>somemachine$ <b>ssh-keygen -v -l -f /etc/ssh/ssh_host_rsa_key.pub</b>
+2048 b8:5a:1e:47:77:a8:f5:14:bc:d2:25:99:50:55:f6:f7 somehost (RSA)
++--[ RSA 2048]----+
+|         .   .   |
+|        S   . .  |
+|         = o o   |
+|        o * = . .|
+|         + * +E +|
+|          . ++=B+|
++-----------------+
+</pre>
+<div class="handout">
+    Yes, that art is different. As you'll see on the next slide,
+    the fingerprints were different this whole time. It was just
+    hard to notice it.
+</div>
+</div>
+
+<div class="slide">
+    <h1>Verifying host keys visually (continued)</h1>
+    <ul>
+        <li>Here are the fingerprints that were presented on previous slides.
+    <p>
+    <pre>
+b8:5a:1e:47:87:48:58:14:6b:d2:52:3c:50:55:f6:f7
+b8:5a:1e:47:77:a8:f5:14:bc:d2:25:99:50:55:f6:f7
+</pre>
+    </li>
+    <p>
+    <li>There are tools that can generate keys with similar-looking
+    fingerprints.</li>
+    <li>Takeaway: Visual mode is helpful!</li>
+    <p>
+
+</div>
+
+<div class="slide">
+<h1>Showing art on all connections...</h1>
+<pre>$ <b>head -3 ~/.ssh/config</b>
+# Global configuration options
+VisualHostKey yes
+NumberOfPasswordPrompts 1
+
+$ <b>ssh somemachine</b>
+Host key fingerprint is b8:5a:1e:47:87:48:58:14:6b:d2:52:3c:50:55:f6:f7
++--[ RSA 2048]----+
+|    .=*o..o      |
+|     +o+ . .     |
+|    o =.o   . .  |
+|      + .        |
+|     o .         |
+|    .            |
++-----------------+
+xlr@somemachine's password:
+</pre>
+<p>
+<div class="handout">
+    This allows you to abort if the art is different - even if
+    someone has modified your <code>~/.ssh/known_hosts</code> file!
+</div>
+</div>
+
+<div class="slide">
+<h1>Uh oh, this is bad...</h1>
+Seen this before?
+<pre>
+$ <b>ssh -o VisualHostKey=yes somemachine</b>
+<small>@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the RSA key sent by the remote host is
+b8:5a:1e:47:77:a8:f5:14:bc:d2:25:99:50:55:f6:f7
+Please contact your system administrator.
+Add correct host key in /home/xlr/.ssh/known_hosts to get rid of this message.
+Offending RSA key in /home/xlr/.ssh/known_hosts:14
+  remove with: <span style="color:#f80">ssh-keygen -f "/home/xlr/.ssh/known_hosts" -R somemachine</span>
+RSA host key for localhost has changed and you have requested strict checking.
+Host key verification failed.</small>
+</pre>
+</div>
+
+<div class="slide">
+<h1>Uh oh, this is bad. (continued)</h1>
+Various things can cause this warning:
+<ul>
+    <li>Non-security problems</li>
+    <ul>
+        <li>You're hitting the wrong server, e.g. a DNS/DHCP change.</li>
+        <li>The machine has been reinstalled</li>
+        <li>The machine had new keys generated intentionally</li>
+    </ul>
+    <li>Security issues</li>
+    <ul>
+        <li>The machine has been compromised</li>
+        <li>Someone is doing a MITM against you</li>
+        <li>Someone mucked with your <code>~/.ssh/known_hosts</code></li>
+    </ul>
+    <li>Actions</li>
+    <ul>
+        <li>Talk to the server administrator</li>
+        <li>Pretend everything's OK and delete the old
+             <code>known_hosts</code> key</li>
+        <li>Run away, RUN AWAY!</li>
+    </ul>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Verifying Host Keys with SSHFP</h1>
+Thus far our host key verification choices are
+<ul>
+    <li>Get the host key fingerprint out-of-band ahead of time</li>
+    <li>Verify it matches after it's too late</li>
+    <li>Blind faith</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Verifying Host Keys with SSHFP (continued)</h1>
+One Solution: Store host keys in DNS.
+<ul>
+    <li>New RR type, SSHFP, stores fingerprints.</li>
+    <li>Generate the DNS data with <code>ssh-keygen</code>, and stick
+        into DNS.
+    <br>
+<pre>$ <b>ssh-keygen -r host.example.com \
+             -f /etc/ssh/ssh_host_rsa_key.pub </b>
+somemachine IN SSHFP 1 1 8a181c1f137559eefc7b0c35fceb357af3651683
+</pre>
+</li>
+    <li>Use <code>VerifyHostKeyDNS</code> to query DNS for keys</li>
+    <ul>
+        <li><code>yes</code>: automatically trust DNS (if secure)</li>
+        <li><code>ask</code>: show DNS results and still ask to trust</li>
+        <li><code>no</code>: Don't look up SSHFP records at all</li>
+    </ul>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Verifying Host Keys with SSHFP (continued)</h1>
+If you're in <code>ask</code> mode, or don't have DNSSEC enabled,
+you'll still need to answer the question, but you'll get an indication
+that the key is likely valid.
+<p>
+<pre>$ <b>ssh -o VisualHostKey=yes somemachine</b>
+The authenticity of host 'somemachine' can't be established.
+RSA key fingerprint is b8:5a:1e:47:87:48:58:14:6b:d2:52:3c:50:55:f6:f7
+<span style="color:#f80">Matching host key fingerprint found in DNS.</span>
+Are you sure you want to continue connecting (yes/no)? 
+</pre>
+</div>
+
+<div class="slide">
+<h1>Other options</h1>
+<ul>
+    <li>Push out authoritative <code>/etc/ssh/ssh_known_hosts</code> files to ssh client machines.
+    <ul>
+        <li>Perhaps build it via <code>ssh-keyscan</code>
+        <li>Push via your configuration management tool of choice,
+            or <code>scp</code>, etc.
+        <li>Maybe restrict the push using <code>authprogs</code> ;-)</li>
+    </ul>
+</ul>
+</div>
+
+
+<div class="slide">
+<h1>Questions?</h1>
+Q&amp;A
+</div>
+
+<div class="slide">
+<h1>Thanks!</h1>
+Git repository:
+ <a href="http://github.com/daethnir/authprogs"
+  >http://github.com/daethnir/authprogs</a>
+<br>
+Python PyPI package 
+ <a href="https://pypi.python.org/pypi/authprogs/"
+  >https://pypi.python.org/pypi/authprogs/</a>
+<br>
+Presentation: <a href="http://www.ifokr.org/bri/presentations/seagl-2013/"
+               >http://www.ifokr.org/bri/presentations/seagl-2013/</a>
+
+<p>
+<table border=0 width=100% cellpadding="0">
+    <tr><th align=left>Personal</th><th align=left>Work</th></tr>
+    <tr><td valign=top><h3>Bri Hatch<br>
+            Onsight, Inc<br>
+            bri@ifokr.org</h3></td>
+        <td valign=top><h3>Bri Hatch<br>
+            ExtraHop Networks<br>
+            bri@extrahop.com</h3></td>
+    </tr>
+</table>
+</div>
+</div>
+
+</body>
+</html>
